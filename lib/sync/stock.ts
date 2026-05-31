@@ -1,9 +1,15 @@
 /**
  * Stock-on-hand sync for the Howden warehouse only.
+ *
+ * The StockOnHand endpoint returns a flat structure (different from the
+ * nested Warehouse objects on other endpoints). Fields used:
+ *   - ProductGuid (not Product.Guid)
+ *   - WarehouseId (not Warehouse.Guid)
+ *   - WarehouseCode (flat field)
+ *   - AvailableQty, QtyOnHand, AllocatedQty
  */
 
 import { unleashedClientFromEnv } from '@/lib/unleashed/client';
-import type { UnleashedStockOnHand } from '@/lib/unleashed/types';
 import { getSupabaseServiceClient } from '@/lib/supabase/server';
 import { getBewiConfig } from '@/lib/config/bewi';
 import { startSyncRun, completeSyncRun, failSyncRun } from './sync-runs';
@@ -21,7 +27,7 @@ export async function syncStockOnHand(options: { trigger: 'scheduled' | 'manual'
   let pages = 0;
 
   try {
-    for await (const page of client.paged<UnleashedStockOnHand>(
+    for await (const page of client.paged<any>(
       '/StockOnHand',
       { warehouseCode: config.howdenWarehouseCode },
       { pageSize: PAGE_SIZE },
@@ -29,10 +35,10 @@ export async function syncStockOnHand(options: { trigger: 'scheduled' | 'manual'
       pages += 1;
 
       const rows = page.items
-        .filter(s => s.Warehouse?.WarehouseCode === config.howdenWarehouseCode)
-        .map(s => ({
+        .filter((s: any) => s.WarehouseCode === config.howdenWarehouseCode)
+        .map((s: any) => ({
           product_guid: s.ProductGuid,
-          warehouse_guid: s.Warehouse.Guid,
+          warehouse_guid: s.WarehouseId,
           available_quantity: s.AvailableQty ?? 0,
           on_hand_quantity: s.QtyOnHand ?? 0,
           allocated_quantity: s.AllocatedQty ?? 0,
@@ -43,7 +49,7 @@ export async function syncStockOnHand(options: { trigger: 'scheduled' | 'manual'
         const { error } = await supabase
           .from('stock_on_hand')
           .upsert(rows, { onConflict: 'product_guid,warehouse_guid' });
-        if (error) throw new Error(`stock_on_hand upsert: ${error.message}`);
+        if (error) throw new Error('stock_on_hand upsert: ' + error.message);
         upserted += rows.length;
       }
 
