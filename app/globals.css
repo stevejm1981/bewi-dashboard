@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Fraunces', 'Cormorant Garamond', Georgia, serif;
+  --font-sans: 'Geist', 'Söhne', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+@layer base {
+  html, body {
+    background: #fafaf9;
+    color: #0a0a0a;
+    font-family: var(--font-sans);
+    font-feature-settings: 'ss01', 'ss02', 'cv11';
+    -webkit-font-smoothing: antialiased;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Tabular numerals everywhere there's data */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /* Editorial headline */
+  .headline {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.04em;
+    line-height: 0.95;
+  }
+
+  /* Eyebrow / label - small caps style */
+  .eyebrow {
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-weight: 500;
+    color: #525252;
+  }
+
+  /* Data number - large, mono, prominent */
+  .data-figure {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum', 'ss01';
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+
+  .surface {
+    background: #ffffff;
+    border: 1px solid #e7e5e4;
+  }
+
+  .divider {
+    border-color: #e7e5e4;
+  }
+}
