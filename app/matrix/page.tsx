@@ -67,7 +67,9 @@ export default async function MatrixPage() {
               <thead>
                 <tr className="border-b divider text-left">
                   <th className="px-6 py-4 eyebrow font-medium">Line of Business</th>
-                  <th className="px-4 py-4 eyebrow font-medium text-right">Demand</th>
+                  <th className="px-4 py-4 eyebrow font-medium text-right">Demand m³</th>
+                  <th className="px-4 py-4 eyebrow font-medium text-right">Net Sale £</th>
+                  <th className="px-4 py-4 eyebrow font-medium text-right">Kg</th>
                   <th className="px-4 py-4 eyebrow font-medium text-right">In Stock</th>
                   <th className="px-4 py-4 eyebrow font-medium text-right">SC</th>
                   <th className="px-4 py-4 eyebrow font-medium text-right">5MCL</th>
@@ -78,7 +80,7 @@ export default async function MatrixPage() {
               <tbody>
                 {matrix.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-ink-muted">
+                    <td colSpan={9} className="px-6 py-12 text-center text-ink-muted">
                       No data yet. Run an initial sync to populate the dashboard.
                     </td>
                   </tr>
@@ -87,6 +89,8 @@ export default async function MatrixPage() {
                   <tr key={row.product_group_guid} className="border-b divider hover:bg-paper-sunk transition-colors">
                     <td className="px-6 py-3.5 font-medium tracking-tight">{row.group_name}</td>
                     <Cell value={row.demand_m3} emphasis />
+                    <td className="px-4 py-3.5 text-right data-figure text-ink-soft">{formatGBP(row.demand_value)}</td>
+                    <td className="px-4 py-3.5 text-right data-figure text-ink-soft">{formatKg(row.demand_kg)}</td>
                     <Cell value={row.stock_m3} />
                     <Cell value={row.cutting_sc_m3} />
                     <Cell value={row.cutting_5mcl_m3} />
@@ -100,6 +104,8 @@ export default async function MatrixPage() {
                   <tr className="bg-paper-sunk">
                     <td className="px-6 py-4 eyebrow font-medium">Total</td>
                     <Cell value={totals.demand_m3} emphasis bold />
+                    <td className="px-4 py-4 text-right data-figure font-medium">{formatGBP(totals.demand_value)}</td>
+                    <td className="px-4 py-4 text-right data-figure font-medium">{formatKg(totals.demand_kg)}</td>
                     <Cell value={totals.stock_m3} bold />
                     <Cell value={totals.cutting_sc_m3} bold />
                     <Cell value={totals.cutting_5mcl_m3} bold />

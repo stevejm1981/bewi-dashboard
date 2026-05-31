@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { RefreshButton } from './RefreshButton';
+import { SignOutButton } from './SignOutButton';
 import { SyncStatusPill } from './SyncStatusPill';
 
 const NAV_ITEMS = [
@@ -22,9 +23,11 @@ export function DashboardHeader({ active }: { active: string }) {
             </div>
           </Link>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-6">
           <SyncStatusPill />
           <RefreshButton />
+          <span className="text-line-strong">·</span>
+          <SignOutButton />
         </div>
       </div>
       <nav className="max-w-[1600px] mx-auto px-8 flex gap-7 -mb-px">
