@@ -1,91 +1,73 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-
-type State =
-  | { kind: 'idle' }
-  | { kind: 'syncing' }
-  | { kind: 'cooldown'; remaining: number }
-  | { kind: 'error'; message: string };
 
 export function RefreshButton() {
   const router = useRouter();
-  const [state, setState] = useState<State>({ kind: 'idle' });
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [messageTone, setMessageTone] = useState<'info' | 'success' | 'error'>('info');
 
-  useEffect(() => () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-  }, []);
-
-  function startCooldown(seconds: number) {
-    setState({ kind: 'cooldown', remaining: seconds });
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      setState(prev => {
-        if (prev.kind !== 'cooldown') return prev;
-        const next = prev.remaining - 1;
-        if (next <= 0) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          return { kind: 'idle' };
-        }
-        return { kind: 'cooldown', remaining: next };
-      });
-    }, 1000);
-  }
+  // Clear messages after 5 seconds
+  useEffect(() => {
+    if (message) {
+      const id = setTimeout(() => setMessage(null), 5000);
+      return () => clearTimeout(id);
+    }
+  }, [message]);
 
   async function handleRefresh() {
-    if (state.kind !== 'idle' && state.kind !== 'error') return;
+    setLoading(true);
+    setMessage(null);
 
-    setState({ kind: 'syncing' });
     try {
-      const response = await fetch('/api/sync/manual', { method: 'POST' });
-      const result = await response.json();
+      const res = await fetch('/api/sync/manual', { method: 'POST' });
+      const data = await res.json();
 
-      if (response.status === 429) {
-        startCooldown(result.cooldownRemainingSeconds ?? 60);
-        return;
+      if (res.status === 429) {
+        // Cooldown: someone refreshed recently
+        setMessageTone('info');
+        setMessage('Just refreshed — please wait a moment before refreshing again.');
+      } else if (res.status === 409 || data?.error?.toLowerCase().includes('in progress')) {
+        // Sync currently running
+        setMessageTone('info');
+        setMessage('An automatic refresh is currently underway. Your data will update in a few seconds.');
+      } else if (!res.ok) {
+        setMessageTone('error');
+        setMessage('Refresh failed. Please try again or contact support if it keeps happening.');
+      } else {
+        setMessageTone('success');
+        setMessage('Refresh complete — latest data now loaded.');
+        router.refresh();
       }
-      if (!response.ok) {
-        setState({ kind: 'error', message: result.error ?? 'Sync failed' });
-        setTimeout(() => setState({ kind: 'idle' }), 4000);
-        return;
-      }
-
-      router.refresh();
-      startCooldown(60);
-    } catch (e: any) {
-      setState({ kind: 'error', message: e?.message ?? 'Network error' });
-      setTimeout(() => setState({ kind: 'idle' }), 4000);
+    } catch (e) {
+      setMessageTone('error');
+      setMessage('Refresh failed. Check your connection and try again.');
+    } finally {
+      setLoading(false);
     }
   }
 
-  const label =
-    state.kind === 'syncing' ? 'Refreshing…'
-    : state.kind === 'cooldown' ? `Ready in ${state.remaining}s`
-    : state.kind === 'error' ? state.message
-    : 'Refresh data';
-
-  const disabled = state.kind === 'syncing' || state.kind === 'cooldown';
+  const toneClass =
+    messageTone === 'success' ? 'text-accent-ok'
+    : messageTone === 'error' ? 'text-accent-alert'
+    : 'text-ink-muted';
 
   return (
-    <button
-      onClick={handleRefresh}
-      disabled={disabled}
-      className={`
-        text-xs uppercase tracking-[0.14em] font-medium
-        px-4 py-2.5 border transition-all
-        ${state.kind === 'error'
-          ? 'border-accent-alert text-accent-alert'
-          : 'border-ink text-ink hover:bg-ink hover:text-paper'
-        }
-        ${disabled ? 'opacity-60 cursor-not-allowed' : ''}
-      `}
-    >
-      {state.kind === 'syncing' && (
-        <span className="inline-block w-3 h-3 mr-2 align-middle border-2 border-current border-r-transparent rounded-full animate-spin" />
+    <div className="flex items-center gap-3">
+      {message && (
+        <span className={`text-xs tabular max-w-xs ${toneClass}`}>
+          {message}
+        </span>
       )}
-      {label}
-    </button>
+      <button
+        onClick={handleRefresh}
+        disabled={loading}
+        className="px-5 py-2 border border-ink text-ink text-xs uppercase tracking-[0.16em] font-medium hover:bg-ink hover:text-paper transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {loading ? 'Refreshing...' : 'Refresh Data'}
+      </button>
+    </div>
   );
 }
