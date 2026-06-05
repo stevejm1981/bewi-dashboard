@@ -142,7 +142,7 @@ export async function syncSalesOrders(options: { trigger: 'scheduled' | 'manual'
       recordsProcessed: processed,
       recordsUpserted: upserted,
       pagesProcessed: pages,
-      recordsRemoved: removed,
+
     });
     return { processed, upserted, pages, removed };
   } catch (e: any) {

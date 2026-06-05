@@ -139,7 +139,7 @@ export async function syncShipments(options: { trigger: 'scheduled' | 'manual' |
       recordsProcessed: processed,
       recordsUpserted: upserted,
       pagesProcessed: pages,
-      recordsRemoved: removed,
+
     });
     return { processed, upserted, pages, removed };
   } catch (e: any) {
