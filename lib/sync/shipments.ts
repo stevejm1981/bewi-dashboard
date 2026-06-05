@@ -115,7 +115,7 @@ export async function syncShipments(options: { trigger: 'scheduled' | 'manual' |
 
       if (fetchError) throw new Error('reconciliation fetch: ' + fetchError.message);
 
-      const localGuids = (localShipments ?? []).map(s => s.guid);
+      const localGuids = (localShipments ?? []).map((s: any) => s.guid);
       const staleGuids = localGuids.filter(g => !seenGuids.has(g));
 
       if (staleGuids.length > 0) {
