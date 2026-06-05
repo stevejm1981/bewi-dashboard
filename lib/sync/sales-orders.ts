@@ -119,7 +119,7 @@ export async function syncSalesOrders(options: { trigger: 'scheduled' | 'manual'
       if (fetchError) throw new Error('reconciliation fetch: ' + fetchError.message);
 
       const localGuids = (localOrders ?? []).map((o: any) => o.guid);
-      const staleGuids = localGuids.filter(g => !seenGuids.has(g));
+      const staleGuids = localGuids.filter((g: string) => !seenGuids.has(g));
 
       if (staleGuids.length > 0) {
         const { error: linesError } = await supabase
