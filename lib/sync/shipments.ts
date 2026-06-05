@@ -1,3 +1,11 @@
+/**
+ * Sales shipments sync with reconciliation.
+ *
+ * For each open status, pulls all shipments from Unleashed and upserts.
+ * After pulling all statuses, deletes local shipments that weren't seen
+ * in this sync - these have moved to Dispatched or another closed status.
+ */
+
 import { unleashedClientFromEnv } from '@/lib/unleashed/client';
 import { parseUnleashedDateOrNull } from '@/lib/unleashed/date-parser';
 import { getSupabaseServiceClient } from '@/lib/supabase/server';
@@ -20,19 +28,20 @@ export async function syncShipments(options: { trigger: 'scheduled' | 'manual' |
   let processed = 0;
   let upserted = 0;
   let pages = 0;
+  let removed = 0;
+
+  const seenGuids = new Set<string>();
 
   try {
     for (const status of OPEN_SHIPMENT_STATUSES) {
-      for await (const page of client.paged<any>(
-        '/SalesShipments',
-        { warehouseGuid: config.howdenWarehouseGuid, shipmentStatus: status },
-        { pageSize: PAGE_SIZE },
-      )) {
+      for await (const page of client.paged<any>('/SalesShipments', { warehouseGuid: config.howdenWarehouseGuid, shipmentStatus: status }, { pageSize: PAGE_SIZE })) {
         pages += 1;
 
-        const openShipments = page.items.filter(
-          (s: any) => s.ShipmentStatus !== 'Dispatched' && s.Warehouse?.Guid === config.howdenWarehouseGuid,
-        );
+        const openShipments = page.items.filter((s: any) => s.ShipmentStatus !== 'Dispatched' && s.Warehouse?.Guid === config.howdenWarehouseGuid);
+
+        for (const s of openShipments) {
+          if (s.Guid) seenGuids.add(s.Guid);
+        }
 
         if (openShipments.length === 0) {
           processed += page.items.length;
@@ -71,9 +80,7 @@ export async function syncShipments(options: { trigger: 'scheduled' | 'manual' |
         }));
 
         if (shipmentRows.length > 0) {
-          const { error } = await supabase
-            .from('sales_shipments')
-            .upsert(shipmentRows, { onConflict: 'guid' });
+          const { error } = await supabase.from('sales_shipments').upsert(shipmentRows, { onConflict: 'guid' });
           if (error) throw new Error('sales_shipments upsert: ' + error.message);
           upserted += shipmentRows.length;
         }
@@ -91,9 +98,7 @@ export async function syncShipments(options: { trigger: 'scheduled' | 'manual' |
           })),
         );
         if (lineRows.length > 0) {
-          const { error } = await supabase
-            .from('sales_shipment_lines')
-            .upsert(lineRows, { onConflict: 'guid' });
+          const { error } = await supabase.from('sales_shipment_lines').upsert(lineRows, { onConflict: 'guid' });
           if (error) throw new Error('sales_shipment_lines upsert: ' + error.message);
         }
 
@@ -101,8 +106,42 @@ export async function syncShipments(options: { trigger: 'scheduled' | 'manual' |
       }
     }
 
-    await completeSyncRun(runId, { recordsProcessed: processed, recordsUpserted: upserted, pagesProcessed: pages });
-    return { processed, upserted, pages };
+    // Reconciliation step
+    if (seenGuids.size > 0) {
+      const { data: localShipments, error: fetchError } = await supabase
+        .from('sales_shipments')
+        .select('guid')
+        .eq('warehouse_guid', config.howdenWarehouseGuid);
+
+      if (fetchError) throw new Error('reconciliation fetch: ' + fetchError.message);
+
+      const localGuids = (localShipments ?? []).map(s => s.guid);
+      const staleGuids = localGuids.filter(g => !seenGuids.has(g));
+
+      if (staleGuids.length > 0) {
+        const { error: linesError } = await supabase
+          .from('sales_shipment_lines')
+          .delete()
+          .in('shipment_guid', staleGuids);
+        if (linesError) throw new Error('reconciliation lines delete: ' + linesError.message);
+
+        const { error: shipsError } = await supabase
+          .from('sales_shipments')
+          .delete()
+          .in('guid', staleGuids);
+        if (shipsError) throw new Error('reconciliation shipments delete: ' + shipsError.message);
+
+        removed = staleGuids.length;
+      }
+    }
+
+    await completeSyncRun(runId, {
+      recordsProcessed: processed,
+      recordsUpserted: upserted,
+      pagesProcessed: pages,
+      recordsRemoved: removed,
+    });
+    return { processed, upserted, pages, removed };
   } catch (e: any) {
     await failSyncRun(runId, e?.message ?? String(e));
     throw e;

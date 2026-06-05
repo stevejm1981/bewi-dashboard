@@ -1,3 +1,12 @@
+/**
+ * Sales orders sync with reconciliation.
+ *
+ * For each open status, pulls all orders from Unleashed and upserts.
+ * After pulling all statuses, deletes local orders that weren't seen
+ * in this sync - these have moved to Completed or another closed status
+ * in Unleashed.
+ */
+
 import { unleashedClientFromEnv } from '@/lib/unleashed/client';
 import { parseUnleashedDateOrNull } from '@/lib/unleashed/date-parser';
 import type { UnleashedSalesOrder } from '@/lib/unleashed/types';
@@ -17,36 +26,125 @@ export async function syncSalesOrders(options: { trigger: 'scheduled' | 'manual'
   const supabase = getSupabaseServiceClient();
   const client = unleashedClientFromEnv();
   const config = await getBewiConfig();
-  let processed = 0; let upserted = 0; let pages = 0;
+
+  let processed = 0;
+  let upserted = 0;
+  let pages = 0;
+  let removed = 0;
+
+  const seenGuids = new Set<string>();
+
   try {
     for (const status of OPEN_STATUSES) {
       for await (const page of client.paged<UnleashedSalesOrder>('/SalesOrders', { warehouseGuid: config.howdenWarehouseGuid, orderStatus: status }, { pageSize: PAGE_SIZE })) {
         pages += 1;
+
         const openOrders = page.items.filter((o: any) => o.Warehouse?.Guid === config.howdenWarehouseGuid);
-        if (openOrders.length === 0) { processed += page.items.length; continue; }
+
+        for (const o of openOrders) {
+          if (o.Guid) seenGuids.add(o.Guid);
+        }
+
+        if (openOrders.length === 0) {
+          processed += page.items.length;
+          continue;
+        }
+
         const customers = new Map<string, any>();
         for (const o of openOrders) {
           if (o.Customer?.Guid) {
-            customers.set(o.Customer.Guid, { guid: o.Customer.Guid, customer_code: (o.Customer as any).CustomerCode ?? '', customer_name: (o.Customer as any).CustomerName ?? o.Customer.Name ?? '', obsolete: false });
+            customers.set(o.Customer.Guid, {
+              guid: o.Customer.Guid,
+              customer_code: (o.Customer as any).CustomerCode ?? '',
+              customer_name: (o.Customer as any).CustomerName ?? o.Customer.Name ?? '',
+              obsolete: false,
+            });
           }
         }
-        if (customers.size > 0) { await supabase.from('customers').upsert([...customers.values()], { onConflict: 'guid' }); }
-        const orderRows = openOrders.map(o => ({ guid: o.Guid, order_number: o.OrderNumber, order_status: o.OrderStatus, customer_guid: o.Customer?.Guid ?? null, warehouse_guid: o.Warehouse?.Guid ?? null, order_date: toDateOnly(parseUnleashedDateOrNull(o.OrderDate)), required_date: toDateOnly(parseUnleashedDateOrNull(o.RequiredDate)), sub_total: o.SubTotal, tax_total: o.TaxTotal, total: o.Total, currency_code: o.Currency?.CurrencyCode ?? null, last_modified_on: parseUnleashedDateOrNull(o.LastModifiedOn), last_synced_at: new Date().toISOString() }));
+        if (customers.size > 0) {
+          await supabase.from('customers').upsert([...customers.values()], { onConflict: 'guid' });
+        }
+
+        const orderRows = openOrders.map(o => ({
+          guid: o.Guid,
+          order_number: o.OrderNumber,
+          order_status: o.OrderStatus,
+          customer_guid: o.Customer?.Guid ?? null,
+          warehouse_guid: o.Warehouse?.Guid ?? null,
+          order_date: toDateOnly(parseUnleashedDateOrNull(o.OrderDate)),
+          required_date: toDateOnly(parseUnleashedDateOrNull(o.RequiredDate)),
+          sub_total: o.SubTotal,
+          tax_total: o.TaxTotal,
+          total: o.Total,
+          currency_code: o.Currency?.CurrencyCode ?? null,
+          last_modified_on: parseUnleashedDateOrNull(o.LastModifiedOn),
+          last_synced_at: new Date().toISOString(),
+        }));
+
         if (orderRows.length > 0) {
           const { error } = await supabase.from('sales_orders').upsert(orderRows, { onConflict: 'guid' });
           if (error) throw new Error('sales_orders upsert: ' + error.message);
           upserted += orderRows.length;
         }
-        const lineRows = openOrders.flatMap(o => (o.SalesOrderLines ?? []).map(l => ({ guid: l.Guid, order_guid: o.Guid, product_guid: l.Product?.Guid ?? null, line_number: l.LineNumber, order_quantity: l.OrderQuantity, unit_price: l.UnitPrice, line_total: l.LineTotal, line_tax: l.LineTax, comments: l.Comments })));
+
+        const lineRows = openOrders.flatMap(o =>
+          (o.SalesOrderLines ?? []).map(l => ({
+            guid: l.Guid,
+            order_guid: o.Guid,
+            product_guid: l.Product?.Guid ?? null,
+            line_number: l.LineNumber,
+            order_quantity: l.OrderQuantity,
+            unit_price: l.UnitPrice,
+            line_total: l.LineTotal,
+            line_tax: l.LineTax,
+            comments: l.Comments,
+          })),
+        );
         if (lineRows.length > 0) {
           const { error } = await supabase.from('sales_order_lines').upsert(lineRows, { onConflict: 'guid' });
           if (error) throw new Error('sales_order_lines upsert: ' + error.message);
         }
+
         processed += page.items.length;
       }
     }
-    await completeSyncRun(runId, { recordsProcessed: processed, recordsUpserted: upserted, pagesProcessed: pages });
-    return { processed, upserted, pages };
+
+    // Reconciliation step: remove stale orders that moved to Completed
+    if (seenGuids.size > 0) {
+      const { data: localOrders, error: fetchError } = await supabase
+        .from('sales_orders')
+        .select('guid')
+        .eq('warehouse_guid', config.howdenWarehouseGuid);
+
+      if (fetchError) throw new Error('reconciliation fetch: ' + fetchError.message);
+
+      const localGuids = (localOrders ?? []).map(o => o.guid);
+      const staleGuids = localGuids.filter(g => !seenGuids.has(g));
+
+      if (staleGuids.length > 0) {
+        const { error: linesError } = await supabase
+          .from('sales_order_lines')
+          .delete()
+          .in('order_guid', staleGuids);
+        if (linesError) throw new Error('reconciliation lines delete: ' + linesError.message);
+
+        const { error: ordersError } = await supabase
+          .from('sales_orders')
+          .delete()
+          .in('guid', staleGuids);
+        if (ordersError) throw new Error('reconciliation orders delete: ' + ordersError.message);
+
+        removed = staleGuids.length;
+      }
+    }
+
+    await completeSyncRun(runId, {
+      recordsProcessed: processed,
+      recordsUpserted: upserted,
+      pagesProcessed: pages,
+      recordsRemoved: removed,
+    });
+    return { processed, upserted, pages, removed };
   } catch (e: any) {
     await failSyncRun(runId, e?.message ?? String(e));
     throw e;
