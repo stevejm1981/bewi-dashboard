@@ -64,7 +64,7 @@ export default async function MatrixPage() {
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm tabular">
-              <thead className="sticky top-0 z-10 bg-paper-card shadow-[0_1px_0_0_var(--color-line,#e5e5e5)]">
+              <thead>
                 <tr className="border-b divider text-left">
                   <th className="px-6 py-4 eyebrow font-medium">Line of Business</th>
                   <th className="px-4 py-4 eyebrow font-medium text-right">Demand m³</th>
