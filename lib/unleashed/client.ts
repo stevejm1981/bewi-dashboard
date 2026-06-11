@@ -6,6 +6,13 @@
  * query params). See the unleashed-api-reference skill for full signing rules.
  *
  * Do not duplicate this client. Every Unleashed call goes through it.
+ *
+ * Notes:
+ * - cache: 'no-store' is required. Next.js App Router caches outbound
+ *   fetch() GET responses by default, which caused the dashboard to serve
+ *   stale Unleashed data on Vercel while local scripts saw fresh data.
+ * - Transient errors (rate limiting, occasional 4xx/5xx under load) are
+ *   retried up to 3 times with backoff. Pages are paced with a short delay.
  */
 
 import crypto from 'node:crypto';
@@ -61,6 +68,7 @@ export class UnleashedClient {
   /**
    * GET request. Signs over the full query string (without leading ?).
    * Pagination uses page number in the URL path: /Endpoint/Page/{n}.
+   * Retries transient failures up to 3 times with linear backoff.
    */
   async get<T>(path: string, queryParams: Record<string, string | number | boolean | undefined> = {}): Promise<T> {
     const filtered = Object.entries(queryParams)
@@ -70,23 +78,35 @@ export class UnleashedClient {
     const queryString = new URLSearchParams(filtered).toString();
     const url = queryString ? `${BASE_URL}${path}?${queryString}` : `${BASE_URL}${path}`;
 
-   const response = await fetch(url, {
-  method: 'GET',
-  headers: this.buildHeaders(queryString),
-  cache: 'no-store',
-});
+    const maxAttempts = 3;
+    let lastError: Error | null = null;
 
-    if (!response.ok) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: this.buildHeaders(queryString),
+        cache: 'no-store',
+      });
+
+      if (response.ok) {
+        return response.json() as Promise<T>;
+      }
+
       const body = await response.text();
-      throw new UnleashedApiError(response.status, body, `GET ${path} failed: ${response.status}`);
+      lastError = new UnleashedApiError(response.status, body, `GET ${path} failed: ${response.status}`);
+
+      if (attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, attempt * 1500));
+      }
     }
 
-    return response.json() as Promise<T>;
+    throw lastError;
   }
 
   /**
    * Paged GET. Iterates pages using the /Endpoint/Page/{n} convention.
    * Yields each page so callers can checkpoint between pages.
+   * Pages are paced with a short delay to avoid hammering the API.
    */
   async *paged<T>(
     basePath: string,
@@ -109,6 +129,7 @@ export class UnleashedClient {
       };
 
       if (page >= response.Pagination.NumberOfPages) break;
+      await new Promise(r => setTimeout(r, 300));
       page += 1;
       if (page - (options.startPage ?? 1) >= maxPages) break;
     }
