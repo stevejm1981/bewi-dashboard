@@ -70,10 +70,11 @@ export class UnleashedClient {
     const queryString = new URLSearchParams(filtered).toString();
     const url = queryString ? `${BASE_URL}${path}?${queryString}` : `${BASE_URL}${path}`;
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: this.buildHeaders(queryString),
-    });
+   const response = await fetch(url, {
+  method: 'GET',
+  headers: this.buildHeaders(queryString),
+  cache: 'no-store',
+});
 
     if (!response.ok) {
       const body = await response.text();
