@@ -17,7 +17,7 @@ interface MatrixRow {
   cutting_spc_m3: number;
 }
 
-const TH = 'sticky top-0 z-10 bg-paper-card px-4 py-4 eyebrow font-medium';
+const TH = 'sticky top-0 z-10 bg-white shadow-[0_1px_0_0_#e7e5e4] px-4 py-4 eyebrow font-medium';
 
 export default async function MatrixPage() {
   const supabase = getSupabaseServerClient();
