@@ -2,7 +2,7 @@
  * CSV export endpoint. Streams CSV from a view query.
  *
  * Query params:
- *   - view: 'expected_to_ship' | 'open_orders' | 'open_shipments' | 'carrier_volume'
+ *   - view: one of the keys in VIEW_MAP below
  *
  * Filtering is applied through Supabase query params at /api/export/csv?view=...&filter=...
  * (filter syntax is intentionally simple for the prototype).
@@ -16,9 +16,11 @@ export const dynamic = 'force-dynamic';
 
 const VIEW_MAP: Record<string, string> = {
   expected_to_ship: 'v_expected_to_ship',
+  expected_to_ship_placed: 'v_expected_to_ship_placed',
   open_orders: 'sales_orders',
   open_shipments: 'sales_shipments',
   carrier_volume: 'v_carrier_volume',
+  carrier_volume_placed: 'v_carrier_volume_placed',
   volume_matrix: 'v_volume_matrix',
 };
 
