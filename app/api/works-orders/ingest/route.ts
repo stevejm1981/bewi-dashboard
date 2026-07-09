@@ -14,6 +14,11 @@
  * net_m3 in our products table. A line with no usable net_m3 is quarantined
  * rather than allowed to contribute zero silently (this catches any kg-based
  * expansion line that should have been excluded upstream).
+ *
+ * Production line is normalised to uppercase on ingest so the dashboard
+ * columns (SC, 5MCL, LPC, SPC ...) match regardless of the case the app sends.
+ * Required date is parsed defensively: an unparseable value becomes null
+ * rather than failing the whole batch.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -39,6 +44,12 @@ interface IncomingPayload {
   works_orders?: IncomingWorksOrder[];
 }
 
+function safeDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 export async function POST(request: NextRequest) {
   const providedKey = request.headers.get('x-api-key');
   const expectedKey = process.env.WORKS_ORDER_INGEST_SECRET;
@@ -56,7 +67,6 @@ export async function POST(request: NextRequest) {
     request.headers.get('x-real-ip') ??
     null;
 
-  // Open an ingest run record
   const { data: runRow, error: runError } = await supabase
     .from('works_order_ingest_runs')
     .insert({ started_at: new Date().toISOString(), source_ip: sourceIp })
@@ -82,10 +92,8 @@ export async function POST(request: NextRequest) {
 
     const incoming = Array.isArray(payload.works_orders) ? payload.works_orders : [];
     const rowCount = incoming.length;
-
     const now = new Date().toISOString();
 
-    // Resolve product GUIDs and fallback net_m3 in one lookup, keyed by product_code
     const codes = Array.from(
       new Set(incoming.map((w) => (w.product_code ?? '').trim()).filter((c) => c.length > 0)),
     );
@@ -112,7 +120,6 @@ export async function POST(request: NextRequest) {
       const quantity = typeof w.output_quantity === 'number' ? w.output_quantity : null;
       const product = productByCode.get(sku);
 
-      // net_m3: payload first, then product table
       const payloadNetM3 = typeof w.net_m3 === 'number' ? w.net_m3 : null;
       const resolvedNetM3 = payloadNetM3 ?? product?.net_m3 ?? null;
 
@@ -134,7 +141,6 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // Guard against duplicate assembly numbers in one payload (last wins)
       seenIds.add(worksOrderId);
 
       validRows.push({
@@ -143,16 +149,15 @@ export async function POST(request: NextRequest) {
         product_guid: product?.guid ?? null,
         quantity,
         net_m3: resolvedNetM3,
-        cutting_line: (w.production_line ?? '').trim() || null,
+        cutting_line: (w.production_line ?? '').trim().toUpperCase() || null,
         status: 'in_progress',
-        expected_completion_at: w.required_date ? new Date(w.required_date).toISOString() : null,
+        expected_completion_at: safeDate(w.required_date),
         missing_from_feed: false,
         last_seen_at: now,
         updated_at: now,
       });
     }
 
-    // Upsert the valid works orders (keyed on works_order_id)
     let upsertedCount = 0;
     if (validRows.length > 0) {
       const { error: upsertError } = await supabase
@@ -162,8 +167,6 @@ export async function POST(request: NextRequest) {
       upsertedCount = validRows.length;
     }
 
-    // Reconciliation: mark anything not in this snapshot as missing_from_feed.
-    // These have completed in the app since the last post.
     const seenList = Array.from(seenIds);
     let markedMissingCount = 0;
     {
@@ -173,7 +176,6 @@ export async function POST(request: NextRequest) {
         .eq('missing_from_feed', false);
 
       if (seenList.length > 0) {
-        // Postgrest "not in" via not.in filter
         const inList = '(' + seenList.map((id) => '"' + id.replace(/"/g, '') + '"').join(',') + ')';
         query = query.not('works_order_id', 'in', inList);
       }
@@ -183,13 +185,11 @@ export async function POST(request: NextRequest) {
       markedMissingCount = marked?.length ?? 0;
     }
 
-    // Write quarantine rows
     if (quarantineRows.length > 0) {
       const { error: qError } = await supabase.from('works_order_quarantine').insert(quarantineRows);
       if (qError) throw new Error('Quarantine write failed: ' + qError.message);
     }
 
-    // Close the ingest run
     await supabase
       .from('works_order_ingest_runs')
       .update({
