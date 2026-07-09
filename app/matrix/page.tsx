@@ -1,5 +1,6 @@
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
+import { InfoTooltip } from '@/components/dashboard/InfoTooltip';
 import { formatM3, formatKg, formatGBP } from '@/lib/volume/calculate';
 
 export const dynamic = 'force-dynamic';
@@ -44,10 +45,29 @@ export default async function MatrixPage() {
 
       <main className="max-w-[1600px] mx-auto px-8 py-10">
         <section className="grid grid-cols-4 gap-px bg-line mb-10 surface">
-          <Headline label="Open Demand" value={`${formatM3(totals.demand_m3)} m³`} sub={`${formatKg(totals.demand_kg)} kg`} />
-          <Headline label="Qty on Hand" value={`${formatM3(totals.stock_m3)} m³`} />
-          <Headline label="In Progress" value={`${formatM3(totals.cutting_sc_m3 + totals.cutting_5mcl_m3 + totals.cutting_lpc_m3 + totals.cutting_spc_m3)} m³`} sub="all cutting lines" />
-          <Headline label="Demand Value" value={formatGBP(totals.demand_value)} accent />
+          <Headline
+            label="Open Demand"
+            value={`${formatM3(totals.demand_m3)} m³`}
+            sub={`${formatKg(totals.demand_kg)} kg`}
+            tooltip="Total volume on open sales orders at Howden that has not yet been dispatched. Open means Parked, Placed, Backordered, Picking, Picked or Packed. The figure below is the same demand as weight."
+          />
+          <Headline
+            label="Qty on Hand"
+            value={`${formatM3(totals.stock_m3)} m³`}
+            tooltip="Total physical stock currently in the warehouse, before any allocation to open orders is subtracted. Matches the Qty on Hand figure in Unleashed's stock enquiry."
+          />
+          <Headline
+            label="In Progress"
+            value={`${formatM3(totals.cutting_sc_m3 + totals.cutting_5mcl_m3 + totals.cutting_lpc_m3 + totals.cutting_spc_m3)} m³`}
+            sub="all cutting lines"
+            tooltip="Total volume of works orders currently being produced. This is finished product being made that becomes stock once complete. The table columns show the SC, 5MCL, LPC and SPC lines; other production lines are included in this total but not shown as columns."
+          />
+          <Headline
+            label="Demand Value"
+            value={formatGBP(totals.demand_value)}
+            accent
+            tooltip="The net sales value (£) of all open demand at Howden. The commercial worth of everything currently on order."
+          />
         </section>
 
         <section className="surface">
@@ -125,10 +145,13 @@ export default async function MatrixPage() {
   );
 }
 
-function Headline({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+function Headline({ label, value, sub, accent, tooltip }: { label: string; value: string; sub?: string; accent?: boolean; tooltip?: string }) {
   return (
     <div className="bg-paper-card p-6">
-      <div className="eyebrow">{label}</div>
+      <div className="eyebrow flex items-center">
+        {label}
+        {tooltip && <InfoTooltip text={tooltip} />}
+      </div>
       <div className={`headline text-4xl mt-2 ${accent ? 'text-accent' : ''}`}>{value}</div>
       {sub && <div className="text-xs text-ink-muted mt-1 tabular">{sub}</div>}
     </div>
