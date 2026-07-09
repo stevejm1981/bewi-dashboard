@@ -145,7 +145,6 @@ export async function POST(request: NextRequest) {
         net_m3: resolvedNetM3,
         cutting_line: (w.production_line ?? '').trim() || null,
         status: 'in_progress',
-        is_terminal: false,
         expected_completion_at: w.required_date ? new Date(w.required_date).toISOString() : null,
         missing_from_feed: false,
         last_seen_at: now,
