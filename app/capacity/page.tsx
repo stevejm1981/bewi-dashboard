@@ -1,20 +1,14 @@
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 import { formatM3 } from '@/lib/volume/calculate';
-import { formatDistanceToNow } from 'date-fns';
 
 export const dynamic = 'force-dynamic';
 
 interface CapacityRow {
   cutting_line: string;
   daily_capacity_m3: number;
-  completed_today_m3: number;
-  completed_today_count: number;
   in_progress_m3: number;
   in_progress_count: number;
-  remaining_capacity_m3: number;
-  last_completion_at: string | null;
-  throughput_state: 'active' | 'static' | null;
 }
 
 const LINE_DESCRIPTIONS: Record<string, string> = {
@@ -38,21 +32,22 @@ export default async function CapacityPage() {
           <div className="eyebrow">Section B</div>
           <h1 className="headline text-4xl mt-1">Cutting Line <em className="not-italic font-medium">Capacity</em></h1>
           <p className="mt-3 text-sm text-ink-muted max-w-2xl">
-            Daily throughput against configured capacity for each cutting line. Lines flagged "static" have not completed a works order in the last 30 minutes.
+            In-progress works order volume against configured daily capacity for each cutting line.
           </p>
         </header>
 
         <div className="grid grid-cols-2 gap-px bg-line">
           {lines.length === 0 && (
             <div className="col-span-2 surface p-12 text-center text-ink-muted">
-              No cutting line data yet. Run an initial sync and seed mock works orders.
+              No cutting line data yet. Works orders will appear here once the feed is received.
             </div>
           )}
           {lines.map((line) => {
-            const utilisation = line.daily_capacity_m3
-              ? line.completed_today_m3 / line.daily_capacity_m3
+            const load = line.daily_capacity_m3
+              ? line.in_progress_m3 / line.daily_capacity_m3
               : 0;
-            const utilisationPct = Math.min(utilisation * 100, 100);
+            const loadPct = Math.min(load * 100, 100);
+            const overCapacity = line.in_progress_m3 > line.daily_capacity_m3 && line.daily_capacity_m3 > 0;
 
             return (
               <article key={line.cutting_line} className="bg-paper-card p-8 relative">
@@ -61,36 +56,45 @@ export default async function CapacityPage() {
                     <div className="eyebrow">{LINE_DESCRIPTIONS[line.cutting_line] ?? 'Cutting Line'}</div>
                     <h2 className="headline text-5xl mt-1">{line.cutting_line}</h2>
                   </div>
-                  <ThroughputBadge state={line.throughput_state} lastAt={line.last_completion_at} />
+                  <div className="text-xs tabular text-ink-muted">
+                    {line.in_progress_count} {line.in_progress_count === 1 ? 'order' : 'orders'} queued
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-6 mb-6">
-                  <Metric label="Today" value={`${formatM3(line.completed_today_m3)}`} unit="m³" sub={`${line.completed_today_count} orders`} />
+                <div className="grid grid-cols-2 gap-6 mb-6">
                   <Metric label="In Progress" value={`${formatM3(line.in_progress_m3)}`} unit="m³" sub={`${line.in_progress_count} orders`} />
-                  <Metric label="Capacity" value={`${formatM3(line.daily_capacity_m3, 0)}`} unit="m³/day" />
+                  <Metric label="Daily Capacity" value={`${formatM3(line.daily_capacity_m3, 0)}`} unit="m³/day" />
                 </div>
 
-                {/* Capacity bar */}
+                {/* Load bar: in-progress volume against daily capacity */}
                 <div className="space-y-2">
                   <div className="flex items-baseline justify-between text-xs">
-                    <span className="eyebrow">Utilisation</span>
-                    <span className="data-figure">{utilisationPct.toFixed(0)}%</span>
+                    <span className="eyebrow">Load vs daily capacity</span>
+                    <span className={`data-figure ${overCapacity ? 'text-accent-warm' : ''}`}>{loadPct.toFixed(0)}%</span>
                   </div>
                   <div className="h-2 bg-paper-sunk relative">
                     <div
-                      className={`absolute inset-y-0 left-0 ${utilisation > 0.9 ? 'bg-accent-warm' : 'bg-ink'}`}
-                      style={{ width: `${utilisationPct}%` }}
+                      className={`absolute inset-y-0 left-0 ${overCapacity ? 'bg-accent-warm' : 'bg-ink'}`}
+                      style={{ width: `${loadPct}%` }}
                     />
                   </div>
                   <div className="flex justify-between text-xs text-ink-subtle tabular pt-1">
-                    <span>{formatM3(line.completed_today_m3)} done</span>
-                    <span>{formatM3(line.remaining_capacity_m3)} remaining</span>
+                    <span>{formatM3(line.in_progress_m3)} queued</span>
+                    <span>
+                      {overCapacity
+                        ? `${formatM3(line.in_progress_m3 - line.daily_capacity_m3)} over`
+                        : `${formatM3(line.daily_capacity_m3 - line.in_progress_m3)} headroom`}
+                    </span>
                   </div>
                 </div>
               </article>
             );
           })}
         </div>
+
+        <p className="mt-8 text-xs text-ink-subtle max-w-2xl">
+          <span className="eyebrow">Note.</span> In Progress reflects works orders currently open in the works order app. When an order completes it leaves the feed and its finished stock appears under Qty on Hand.
+        </p>
       </main>
     </div>
   );
@@ -105,24 +109,6 @@ function Metric({ label, value, unit, sub }: { label: string; value: string; uni
         {unit && <span className="text-xs text-ink-muted tabular">{unit}</span>}
       </div>
       {sub && <div className="text-xs text-ink-subtle mt-0.5 tabular">{sub}</div>}
-    </div>
-  );
-}
-
-function ThroughputBadge({ state, lastAt }: { state: 'active' | 'static' | null; lastAt: string | null }) {
-  if (!state) {
-    return (
-      <div className="text-xs text-ink-subtle tabular">
-        Idle &middot; no activity today
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className={`inline-block w-1.5 h-1.5 rounded-full ${state === 'active' ? 'bg-accent-ok animate-pulse' : 'bg-accent-warm'}`} />
-      <span className={`tabular ${state === 'static' ? 'text-accent-warm' : 'text-ink-muted'}`}>
-        {state === 'static' ? 'Static' : 'Active'} {lastAt && `· last ${formatDistanceToNow(new Date(lastAt))} ago`}
-      </span>
     </div>
   );
 }
