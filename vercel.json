@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/sync-unleashed",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/sync-unleashed?mode=full",
+      "schedule": "0 2 * * *"
     }
   ]
 }
