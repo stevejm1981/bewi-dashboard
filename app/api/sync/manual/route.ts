@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient, getSupabaseServiceClient } from '@/lib/supabase/server';
 import { runSync } from '@/lib/sync/orchestrator';
 
-export const maxDuration = 300;
+export const maxDuration = 480;
 export const dynamic = 'force-dynamic';
 
 const COOLDOWN_SECONDS = 60;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runSync } from '@/lib/sync/orchestrator';
 
-export const maxDuration = 300; // 5 minutes (Vercel Pro)
+export const maxDuration = 480; // 5 minutes (Vercel Pro)
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
