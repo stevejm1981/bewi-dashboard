@@ -6,8 +6,10 @@
  *  - Concurrency check: if a sync is already running, return early
  *  - Audit log: every manual refresh logged via sync_runs with trigger='manual'
  *
- * Uses the operational sync mode (skips products, customers - just orders,
- * shipments, stock).
+ * Defaults to operational mode (orders, shipments, stock - skips products
+ * and customers, for a fast refresh). Pass { "mode": "full" } in the body
+ * to run a full sync that also refreshes products and customers - needed
+ * when new SKUs have been created in Unleashed since the last full sync.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -19,12 +21,21 @@ export const dynamic = 'force-dynamic';
 
 const COOLDOWN_SECONDS = 60;
 
-export async function POST(_request: NextRequest) {
+export async function POST(request: NextRequest) {
   const supabase = getSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Read requested mode (defaults to operational). Body may be empty.
+  let mode: 'operational' | 'full' = 'operational';
+  try {
+    const body = await request.json();
+    if (body?.mode === 'full') mode = 'full';
+  } catch {
+    // no body / not JSON - keep default operational
   }
 
   const service = getSupabaseServiceClient();
@@ -66,14 +77,13 @@ export async function POST(_request: NextRequest) {
   }
 
   try {
-    const result = await runSync('operational', 'manual', user.id);
+    const result = await runSync(mode, 'manual', user.id);
 
-    // Audit
     await service.from('audit_events').insert({
       entity_type: 'sync',
-      event_type: 'manual_refresh',
+      event_type: mode === 'full' ? 'manual_full_sync' : 'manual_refresh',
       actor_user_id: user.id,
-      payload: { durationMs: result.durationMs, entities: result.entities },
+      payload: { mode, durationMs: result.durationMs, entities: result.entities },
     });
 
     return NextResponse.json(result);
