@@ -1,6 +1,8 @@
+import { Suspense } from 'react';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 import { InfoTooltip } from '@/components/dashboard/InfoTooltip';
+import { MatrixFilters } from '@/components/dashboard/MatrixFilters';
 import { formatM3, formatKg, formatGBP } from '@/lib/volume/calculate';
 
 export const dynamic = 'force-dynamic';
@@ -20,10 +22,36 @@ interface MatrixRow {
 
 const TH = 'sticky top-0 z-10 bg-white shadow-[0_1px_0_0_#e7e5e4] px-4 py-4 eyebrow font-medium';
 
-export default async function MatrixPage() {
+function isIsoDate(v: string | undefined): v is string {
+  return !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+export default async function MatrixPage({
+  searchParams,
+}: {
+  searchParams: { from?: string; to?: string; status?: string };
+}) {
   const supabase = getSupabaseServerClient();
-  const { data: rows } = await supabase.from('v_volume_matrix').select('*');
+
+  // Filters from the URL (absent = unfiltered consolidated view)
+  const dateFrom = isIsoDate(searchParams.from) ? searchParams.from : null;
+  const dateTo = isIsoDate(searchParams.to) ? searchParams.to : null;
+  const statuses = (searchParams.status ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const isFiltered = !!(dateFrom || dateTo || statuses.length);
+
+  // Matrix rows via the parameterised function
+  const { data: rows } = await supabase.rpc('f_volume_matrix', {
+    p_date_from: dateFrom,
+    p_date_to: dateTo,
+    p_statuses: statuses.length ? statuses : null,
+  });
   const matrix = (rows ?? []) as MatrixRow[];
+
+  // Statuses present in the data, for the filter options
+  const { data: statusRows } = await supabase.rpc('f_sales_order_statuses');
+  const statusOptions = ((statusRows ?? []) as Array<{ order_status: string }>)
+    .map((r) => r.order_status)
+    .filter(Boolean);
 
   const totals = matrix.reduce(
     (acc, r) => ({
@@ -39,6 +67,11 @@ export default async function MatrixPage() {
     { demand_m3: 0, demand_kg: 0, demand_value: 0, stock_m3: 0, cutting_sc_m3: 0, cutting_5mcl_m3: 0, cutting_lpc_m3: 0, cutting_spc_m3: 0 },
   );
 
+  const filterSummary = [
+    dateFrom && dateTo ? `orders ${dateFrom} to ${dateTo}` : dateFrom ? `orders from ${dateFrom}` : dateTo ? `orders to ${dateTo}` : null,
+    statuses.length ? `status ${statuses.join(', ')}` : null,
+  ].filter(Boolean).join(' · ');
+
   return (
     <div className="min-h-screen">
       <DashboardHeader active="/matrix" />
@@ -49,24 +82,24 @@ export default async function MatrixPage() {
             label="Open Demand"
             value={`${formatM3(totals.demand_m3)} m³`}
             sub={`${formatKg(totals.demand_kg)} kg`}
-            tooltip="Total volume on open sales orders at Howden that has not yet been dispatched. Open means Parked, Placed, Backordered, Picking, Picked or Packed. The figure below is the same demand as weight."
+            tooltip="Total volume on open sales orders at Howden that has not yet been dispatched. Open means Parked, Placed, Backordered, Picking, Picked or Packed. The figure below is the same demand as weight. Responds to the date and status filters."
           />
           <Headline
             label="Qty on Hand"
             value={`${formatM3(totals.stock_m3)} m³`}
-            tooltip="Total physical stock currently in the warehouse, before any allocation to open orders is subtracted. Matches the Qty on Hand figure in Unleashed's stock enquiry."
+            tooltip="Total physical stock currently in the warehouse, before any allocation to open orders is subtracted. A live snapshot, so it is not affected by the date or status filters."
           />
           <Headline
             label="In Progress"
             value={`${formatM3(totals.cutting_sc_m3 + totals.cutting_5mcl_m3 + totals.cutting_lpc_m3 + totals.cutting_spc_m3)} m³`}
             sub="all cutting lines"
-            tooltip="Total volume of works orders currently being produced. This is finished product being made that becomes stock once complete. The table columns show the SC, 5MCL, LPC and SPC lines; other production lines are included in this total but not shown as columns."
+            tooltip="Total volume of works orders currently being produced. Finished product being made that becomes stock once complete. Not linked to a sales order date, so not affected by the filters."
           />
           <Headline
             label="Demand Value"
             value={formatGBP(totals.demand_value)}
             accent
-            tooltip="The net sales value (£) of all open demand at Howden. The commercial worth of everything currently on order."
+            tooltip="The net sales value (£) of all open demand at Howden. Responds to the date and status filters."
           />
         </section>
 
@@ -75,11 +108,18 @@ export default async function MatrixPage() {
             <div>
               <div className="eyebrow">Section A</div>
               <h2 className="headline text-2xl mt-1">Volume by Line of Business</h2>
+              {isFiltered && (
+                <div className="text-xs mt-1 tabular" style={{ color: '#525252' }}>Filtered: {filterSummary}</div>
+              )}
             </div>
             <p className="text-sm text-ink-muted max-w-md text-right">
               All volumes in m³. NetM3 is the authoritative figure where present, with dimensional fallback otherwise.
             </p>
           </header>
+
+          <Suspense fallback={null}>
+            <MatrixFilters statuses={statusOptions} />
+          </Suspense>
 
           <div className="overflow-auto max-h-[75vh]">
             <table className="w-full text-sm tabular">
@@ -100,7 +140,7 @@ export default async function MatrixPage() {
                 {matrix.length === 0 && (
                   <tr>
                     <td colSpan={9} className="px-6 py-12 text-center text-ink-muted">
-                      No data yet. Run an initial sync to populate the dashboard.
+                      No data for the current filters.
                     </td>
                   </tr>
                 )}
@@ -138,6 +178,9 @@ export default async function MatrixPage() {
         </section>
 
         <p className="mt-8 text-xs text-ink-subtle max-w-2xl">
+          <span className="eyebrow">Filters.</span> The date and status filters apply to the sales order figures (Demand m³, Net Sale £, Kg). Qty on Hand is a live stock snapshot and the cutting line columns come from works orders, so those always show the current position.
+        </p>
+        <p className="mt-3 text-xs text-ink-subtle max-w-2xl">
           <span className="eyebrow">A note on shipment volume.</span> The dashboard calculates shipment volume from each line's shipped quantity, not the parent order total. This is intentional and corrects a long-standing flaw in the legacy Power BI report.
         </p>
       </main>
