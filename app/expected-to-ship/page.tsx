@@ -88,7 +88,8 @@ export default async function ExpectedToShipPage() {
         )}
 
         {[...groups.entries()].map(([dateKey, dateShipments]) => {
-          const dateTotal = dateShipments.reduce((sum, s) => sum + (s.volume_m3 ?? 0), 0);
+          const dateVolume = dateShipments.reduce((sum, s) => sum + (s.volume_m3 ?? 0), 0);
+          const dateWeight = dateShipments.reduce((sum, s) => sum + (s.weight_kg ?? 0), 0);
           return (
             <section key={dateKey} className="mb-8 surface">
               <header className="px-6 py-4 border-b divider bg-paper-sunk">
@@ -96,7 +97,7 @@ export default async function ExpectedToShipPage() {
                 <div className="flex items-baseline justify-between mt-1">
                   <h3 className="headline text-xl">{dateKey === 'unscheduled' ? 'Unscheduled' : formatDate(dateKey)}</h3>
                   <p className="text-xs text-ink-muted tabular">
-                    {dateShipments.length} shipment{dateShipments.length === 1 ? '' : 's'} · {formatM3(dateTotal)} m³
+                    {dateShipments.length} shipment{dateShipments.length === 1 ? '' : 's'} · {formatM3(dateVolume)} m³ · {formatKg(dateWeight)} kg
                   </p>
                 </div>
               </header>
