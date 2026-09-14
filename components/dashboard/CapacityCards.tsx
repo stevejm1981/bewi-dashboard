@@ -16,6 +16,8 @@ export interface WorksOrderDetail {
 export interface CapacityLine {
   cutting_line: string;
   daily_capacity_m3: number;
+  /** Capacity for the selected period (daily x working days). Equals daily when no period. */
+  capacity_m3: number;
   in_progress_m3: number;
   in_progress_count: number;
   orders: WorksOrderDetail[];
@@ -43,7 +45,6 @@ function formatLongDate(iso: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long' });
 }
 
-/** Group orders by due date (YYYY-MM-DD), dates ascending, undated last. */
 function groupByDate(orders: WorksOrderDetail[]): Array<{ key: string; label: string; orders: WorksOrderDetail[]; m3: number }> {
   const map = new Map<string, WorksOrderDetail[]>();
   for (const o of orders) {
@@ -58,12 +59,7 @@ function groupByDate(orders: WorksOrderDetail[]): Array<{ key: string; label: st
   });
   return keys.map((key) => {
     const list = map.get(key)!.slice().sort((a, b) => b.m3 - a.m3);
-    return {
-      key,
-      label: key === 'unscheduled' ? 'Unscheduled' : formatLongDate(key),
-      orders: list,
-      m3: list.reduce((s, o) => s + o.m3, 0),
-    };
+    return { key, label: key === 'unscheduled' ? 'Unscheduled' : formatLongDate(key), orders: list, m3: list.reduce((s, o) => s + o.m3, 0) };
   });
 }
 
@@ -83,7 +79,15 @@ function CalendarIcon() {
   );
 }
 
-export function CapacityCards({ lines }: { lines: CapacityLine[] }) {
+export function CapacityCards({
+  lines,
+  capacityLabel = 'Daily Capacity',
+  inProgressLabel = 'In Progress',
+}: {
+  lines: CapacityLine[];
+  capacityLabel?: string;
+  inProgressLabel?: string;
+}) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
 
@@ -110,9 +114,10 @@ export function CapacityCards({ lines }: { lines: CapacityLine[] }) {
     <div className="grid grid-cols-2 gap-px bg-line">
       {lines.map((line) => {
         const isOpen = expanded === line.cutting_line;
-        const load = line.daily_capacity_m3 ? line.in_progress_m3 / line.daily_capacity_m3 : 0;
+        const cap = line.capacity_m3;
+        const load = cap ? line.in_progress_m3 / cap : 0;
         const loadPct = Math.min(load * 100, 100);
-        const overCapacity = line.in_progress_m3 > line.daily_capacity_m3 && line.daily_capacity_m3 > 0;
+        const overCapacity = cap > 0 && line.in_progress_m3 > cap;
         const canExpand = line.orders.length > 0;
 
         return (
@@ -127,20 +132,18 @@ export function CapacityCards({ lines }: { lines: CapacityLine[] }) {
                 onClick={() => canExpand && setExpanded(isOpen ? null : line.cutting_line)}
                 disabled={!canExpand}
                 className={`text-xs tabular flex items-center gap-1.5 px-2 py-1 -mr-2 rounded transition-colors ${
-                  canExpand ? 'text-ink-soft hover:text-ink hover:bg-paper-sunk cursor-pointer' : 'text-ink-subtle cursor-default'
+                  canExpand ? 'text-ink-soft hover:text-ink cursor-pointer' : 'text-ink-subtle cursor-default'
                 }`}
                 aria-expanded={isOpen}
               >
-                {line.in_progress_count} {line.in_progress_count === 1 ? 'order' : 'orders'} queued
-                {canExpand && (
-                  <span className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden>▾</span>
-                )}
+                {line.in_progress_count} {line.in_progress_count === 1 ? 'order' : 'orders'}
+                {canExpand && <span className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden>▾</span>}
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-6 mb-6">
               <div>
-                <div className="eyebrow">In Progress</div>
+                <div className="eyebrow">{inProgressLabel}</div>
                 <div className="flex items-baseline gap-1.5 mt-1">
                   <span className="headline text-2xl">{formatM3(line.in_progress_m3)}</span>
                   <span className="text-xs text-ink-muted tabular">m³</span>
@@ -148,48 +151,38 @@ export function CapacityCards({ lines }: { lines: CapacityLine[] }) {
                 <div className="text-xs text-ink-subtle mt-0.5 tabular">{line.in_progress_count} orders</div>
               </div>
               <div>
-                <div className="eyebrow">Daily Capacity</div>
+                <div className="eyebrow">{capacityLabel}</div>
                 <div className="flex items-baseline gap-1.5 mt-1">
-                  <span className="headline text-2xl">{formatM3(line.daily_capacity_m3, 0)}</span>
-                  <span className="text-xs text-ink-muted tabular">m³/day</span>
+                  <span className="headline text-2xl">{formatM3(cap, 0)}</span>
+                  <span className="text-xs text-ink-muted tabular">m³</span>
                 </div>
+                {cap !== line.daily_capacity_m3 && (
+                  <div className="text-xs text-ink-subtle mt-0.5 tabular">{formatM3(line.daily_capacity_m3, 0)} m³/day</div>
+                )}
               </div>
             </div>
 
-            {/* Load bar */}
             <div className="space-y-2">
               <div className="flex items-baseline justify-between text-xs">
-                <span className="eyebrow">Load vs daily capacity</span>
+                <span className="eyebrow">Load vs capacity</span>
                 <span className="data-figure" style={{ color: overCapacity ? '#b91c1c' : undefined }}>{loadPct.toFixed(0)}%</span>
               </div>
               <div className="h-2 relative" style={{ backgroundColor: '#f5f5f4' }}>
-                <div
-                  className="absolute inset-y-0 left-0"
-                  style={{ width: `${loadPct}%`, backgroundColor: overCapacity ? '#b91c1c' : '#1c1917' }}
-                />
+                <div className="absolute inset-y-0 left-0" style={{ width: `${loadPct}%`, backgroundColor: overCapacity ? '#b91c1c' : '#1c1917' }} />
               </div>
               <div className="flex justify-between text-xs text-ink-subtle tabular pt-1">
                 <span>{formatM3(line.in_progress_m3)} queued</span>
-                <span>
-                  {overCapacity
-                    ? `${formatM3(line.in_progress_m3 - line.daily_capacity_m3)} over`
-                    : `${formatM3(line.daily_capacity_m3 - line.in_progress_m3)} headroom`}
-                </span>
+                <span>{overCapacity ? `${formatM3(line.in_progress_m3 - cap)} over` : `${formatM3(cap - line.in_progress_m3)} headroom`}</span>
               </div>
             </div>
 
-            {/* Drill-down */}
             {isOpen && canExpand && (
               <div className="mt-6 pt-5 border-t divider">
                 <div className="flex items-center justify-between mb-3">
                   <div className="eyebrow">Works orders on this line</div>
                   <div className="flex items-center gap-1" role="group" aria-label="View mode">
-                    <button type="button" title="List" aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')} style={iconBtn(viewMode === 'list')}>
-                      <ListIcon />
-                    </button>
-                    <button type="button" title="Timeline by due date" aria-pressed={viewMode === 'timeline'} onClick={() => setViewMode('timeline')} style={iconBtn(viewMode === 'timeline')}>
-                      <CalendarIcon />
-                    </button>
+                    <button type="button" title="List" aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')} style={iconBtn(viewMode === 'list')}><ListIcon /></button>
+                    <button type="button" title="Timeline by due date" aria-pressed={viewMode === 'timeline'} onClick={() => setViewMode('timeline')} style={iconBtn(viewMode === 'timeline')}><CalendarIcon /></button>
                   </div>
                 </div>
 
@@ -234,9 +227,7 @@ export function CapacityCards({ lines }: { lines: CapacityLine[] }) {
                       <div key={g.key} className="mb-4">
                         <div className="flex items-baseline justify-between px-2 py-1.5 border-b" style={{ borderColor: '#1c1917' }}>
                           <span className="text-xs font-medium">{g.label}</span>
-                          <span className="text-xs text-ink-muted tabular">
-                            {g.orders.length} {g.orders.length === 1 ? 'order' : 'orders'} · {formatM3(g.m3)} m³
-                          </span>
+                          <span className="text-xs text-ink-muted tabular">{g.orders.length} {g.orders.length === 1 ? 'order' : 'orders'} · {formatM3(g.m3)} m³</span>
                         </div>
                         <table className="w-full text-xs tabular">
                           <tbody>
