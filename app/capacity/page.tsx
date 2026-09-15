@@ -86,8 +86,8 @@ export default async function CapacityPage({
 
   // 1. Lines and their daily capacity
   const { data: capRows } = await supabase.from('v_cutting_line_capacity').select('*');
-  const capacities = (capRows ?? []) as CapacityRow[];
-
+  const CAPACITY_TAB_LINES = ['SC', '5MCL', 'LPC', 'SPC'];
+  const capacities = ((capRows ?? []) as CapacityRow[]).filter((c) => CAPACITY_TAB_LINES.includes(c.cutting_line));
   // 2. In-progress works orders, filtered to the period by DUE date if set
   let query = supabase
     .from('works_orders')
