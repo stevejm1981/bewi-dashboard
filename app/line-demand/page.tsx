@@ -87,7 +87,7 @@ export default async function LineDemandPage({
       p_statuses: statuses.length ? statuses : null,
     }),
     supabase.rpc('f_shipment_order_statuses'),
-    supabase.from('cutting_line_capacity').select('cutting_line, daily_capacity_m3'),
+        supabase.from('v_cutting_line_capacity').select('cutting_line, daily_capacity_m3'),
   ]);
 
   const demand = (demandRows ?? []) as DemandRow[];
