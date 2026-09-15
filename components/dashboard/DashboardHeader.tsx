@@ -6,6 +6,7 @@ import { SyncStatusPill } from './SyncStatusPill';
 const NAV_ITEMS = [
   { href: '/matrix', label: 'Volume Matrix' },
   { href: '/capacity', label: 'Cutting Lines' },
+  { href: '/line-demand', label: 'Line Demand' },
   { href: '/timeline', label: 'Timeline' },
   { href: '/expected-to-ship', label: 'Expected to Ship' },
   { href: '/carrier', label: 'Carriers' },
