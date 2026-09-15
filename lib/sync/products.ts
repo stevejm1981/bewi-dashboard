@@ -16,7 +16,6 @@ import { getSupabaseServiceClient } from '@/lib/supabase/server';
 import { startSyncRun, completeSyncRun, failSyncRun } from './sync-runs';
 
 const PAGE_SIZE = 500;
-const VALID_CUTTING_LINES = new Set(['SC', '5MCL', 'LPC', 'SPC']);
 
 function extractAttribute(product: UnleashedProduct, name: string): string | null {
   const attrs = product.AttributeSet?.Attributes ?? [];
@@ -71,7 +70,10 @@ export async function syncProducts(options: { trigger: 'scheduled' | 'manual' | 
       const productRows = page.items.map(p => {
         const netM3 = parseNumericOrNull(extractAttribute(p, 'NetM3'));
         const cuttingRaw = extractAttribute(p, 'Category');
-        const cuttingLine = cuttingRaw && VALID_CUTTING_LINES.has(cuttingRaw) ? cuttingRaw : null;
+        // Keep whatever the Category attribute says (trimmed, uppercased).
+        // Previously whitelisted to SC/5MCL/LPC/SPC, which silently dropped
+        // any other line (SL, GHP, moulds) and left those products unassigned.
+        const cuttingLine = cuttingRaw && cuttingRaw.trim() ? cuttingRaw.trim().toUpperCase() : null;
 
         return {
           guid: p.Guid,
